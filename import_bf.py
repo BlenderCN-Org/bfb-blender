@@ -4,7 +4,7 @@ import bpy
 import mathutils
 import math
 from struct import iter_unpack, calcsize, unpack_from
-from .common_bfb import get_bfb_matrix, decompose_srt, bfbname_to_blendername, create_empty, get_armature, create_anim
+from .common_bfb import get_bfb_matrix, decompose_srt, bfbname_to_blendername, create_empty, get_armature
 from bisect import bisect_left
 
 def interpolate(x_list, xp, fp):
@@ -22,9 +22,10 @@ def interpolate(x_list, xp, fp):
 
 correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 correction_local_inv = correction_local.inverted()
+
 def import_keymat(rest_rot_inv, key_matrix):
-	key_matrix = rest_rot_inv * key_matrix
-	return correction_local * key_matrix * correction_local_inv
+	key_matrix = rest_rot_inv @ key_matrix
+	return correction_local @ key_matrix @ correction_local_inv
 	
 def load(operator, context, files = [], filepath = "", set_fps=False):
 	starttime = time.clock()
@@ -59,6 +60,13 @@ def load(operator, context, files = [], filepath = "", set_fps=False):
 		for anim in files:
 			read_bf_empties(dirname, anim.name, info, fpms)
 	return {'FINISHED'}
+
+def create_anim(ob, anim_name):
+	action = bpy.data.actions.new(name = anim_name)
+	action.use_fake_user = True
+	ob.animation_data_create()
+	ob.animation_data.action = action
+	return action
 	
 def read_bf_empties(dir, anim, info, fpms):
 	print("Reading",anim)
@@ -104,7 +112,7 @@ def read_bf_empties(dir, anim, info, fpms):
 				for element in iter_unpack(fmt, datastream[8+pos : 8+pos+calcsize(fmt)*num_keys]):
 					#add the keys
 					for fcurve, key in zip(fcurves, [element[x]/scale_fac for x in key_i]):
-						fcurve.keyframe_points.insert(round(element[0]*fpms), key).interpolation = interp
+						fcurve.keyframe_points.insert(element[0]*fpms, key).interpolation = interp
 				pos += num_bytes
 			pos = next_bone
 			
@@ -143,7 +151,7 @@ def read_bf(dir, anim, armature, bones_data, info, fpms):
 						if data_type == "rotation_euler":
 							#here we store the individual data into a list of lists to be remapped and imported later
 							eulers[mod_identifier-6].append(element[1]/scale_fac)
-							eulers[mod_identifier-3].append( round(element[0]*fpms) )
+							eulers[mod_identifier-3].append(element[0]*fpms)
 						else:
 							#all the others can be imported on the fly
 							if data_type == "scale":
@@ -154,7 +162,7 @@ def read_bf(dir, anim, armature, bones_data, info, fpms):
 								key = import_keymat(rest_rot_inv, mathutils.Quaternion([element[x]/scale_fac for x in key_i]).to_matrix().to_4x4()).to_quaternion()
 							#add the keys now
 							for fcurve, k in zip(fcurves, key):
-								fcurve.keyframe_points.insert(round(element[0]*fpms), k).interpolation = interp
+								fcurve.keyframe_points.insert(element[0]*fpms, k).interpolation = interp
 					#Have we just read the Euler Z curve data?
 					if mod_identifier == 8:
 						#initialize the fcurves
